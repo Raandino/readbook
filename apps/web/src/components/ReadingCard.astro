@@ -1,0 +1,120 @@
+---
+/**
+ * ReadingCard — one normalized Reading as a calm feed card. Heterogeneous
+ * sources collapse into the same shape here: a badge, a serif title, an excerpt,
+ * and a quiet footer of reading time + status (+ progress while reading).
+ *
+ * The card is pure markup. A quiet row of actions (archive, mark read/unread,
+ * delete) sits beside the link; which buttons show is driven by CSS from
+ * `data-status`, so scripts/feed.ts only has to flip that one attribute when
+ * the status changes.
+ */
+import type { ReadingSummary } from "@readbook/core";
+
+interface Props {
+  reading: ReadingSummary;
+  /** Just added (or re-added) — the shelf scrolls to and briefly marks it. */
+  added?: boolean;
+}
+
+const { reading, added = false } = Astro.props;
+
+const sourceLabel: Record<ReadingSummary["source"], string> = {
+  substack: "Substack",
+  blog: "Blog",
+  reddit: "Reddit",
+  x: "X",
+  generic: "Web",
+  file: "File",
+  note: "Note",
+};
+
+const statusLabel: Record<ReadingSummary["status"], string> = {
+  unread: "Unread",
+  reading: "Reading",
+  read: "Read",
+  archived: "Archived",
+};
+
+// Prefer site name for context; fall back to author so the card never reads bare.
+// Skip it when it only repeats the badge (a note's site name is "Note").
+const rawAttribution = reading.siteName ?? reading.author ?? null;
+const attribution =
+  rawAttribution && rawAttribution.toLowerCase() !== sourceLabel[reading.source].toLowerCase() ? rawAttribution : null;
+const hasImage = Boolean(reading.leadImageUrl);
+const percent = Math.round(Math.min(1, Math.max(0, reading.progress)) * 100);
+---
+
+<article
+  class="card-wrap"
+  data-reading-id={reading.id}
+  data-status={reading.status}
+  data-progress={reading.progress}
+  data-title={reading.title}
+  data-added={added ? "" : undefined}
+>
+  <a class={`card${hasImage ? " has-image" : ""}`} href={`/read/${reading.id}`}>
+    <div class="card-meta">
+      <span class="badge" data-source={reading.source}>{sourceLabel[reading.source]}</span>
+      {attribution && <span>{attribution}</span>}
+    </div>
+
+    <h2 class="card-title">{reading.title}</h2>
+
+    {reading.excerpt && <p class="card-excerpt">{reading.excerpt}</p>}
+
+    <div class="card-foot">
+      <span>{reading.readingMinutes} min read</span>
+      <span class="status-dot" data-status={reading.status} data-status-label>{statusLabel[reading.status]}</span>
+      <span class="card-progress">
+        <progress max="100" value={percent} aria-hidden="true"></progress>
+        <span>{percent}% read</span>
+      </span>
+    </div>
+
+    {
+      hasImage && (
+        <img
+          class="card-image"
+          src={reading.leadImageUrl!}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        />
+      )
+    }
+  </a>
+
+  <div class="card-actions" role="group" aria-label={`Actions for “${reading.title}”`}>
+    <button type="button" class="card-action" data-action="archive" title="Archive" aria-label="Archive">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="4" rx="1" />
+        <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />
+      </svg>
+    </button>
+    <button type="button" class="card-action" data-action="unarchive" title="Move back to shelf" aria-label="Move back to shelf">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="4" rx="1" />
+        <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M12 17v-6M9.5 13.5 12 11l2.5 2.5" />
+      </svg>
+    </button>
+    <button type="button" class="card-action" data-action="mark-read" title="Mark as read" aria-label="Mark as read">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8.5 12.5 2.5 2.5 4.5-5" />
+      </svg>
+    </button>
+    <button type="button" class="card-action" data-action="mark-unread" title="Mark as unread" aria-label="Mark as unread">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+      </svg>
+    </button>
+    <button type="button" class="card-action card-action-danger" data-action="delete" title="Delete" aria-label="Delete">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6.5 7l.8 12a1 1 0 0 0 1 1h7.4a1 1 0 0 0 1-1l.8-12M10 11v5M14 11v5" />
+      </svg>
+    </button>
+  </div>
+</article>

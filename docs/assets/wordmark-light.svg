@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" width="360" height="72" role="img" aria-label="Readbook">
+  <g transform="translate(4 8) scale(1.75)">
+    <rect width="32" height="32" rx="7" fill="#2f5d50"/>
+    <path d="M9 8.5h6.2c1 0 1.8.8 1.8 1.8V24a1 1 0 0 1-1.5.86C14.4 24.2 12.9 23.7 11 23.7H9a1 1 0 0 1-1-1V9.5a1 1 0 0 1 1-1Z" fill="#f7f4ec"/>
+    <path d="M23 8.5h-6.2c-1 0-1.8.8-1.8 1.8V24a1 1 0 0 0 1.5.86c1.1-.66 2.6-1.16 4.5-1.16h2a1 1 0 0 0 1-1V9.5a1 1 0 0 0-1-1Z" fill="#e7e0d0"/>
+  </g>
+  <text x="76" y="50" font-family="Georgia, 'Iowan Old Style', 'Times New Roman', serif" font-size="44" font-weight="600" letter-spacing="-0.5" fill="#211f1b">Readbook</text>
+</svg>

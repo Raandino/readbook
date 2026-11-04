@@ -1,0 +1,27 @@
+{
+  "name": "@readbook/extractor",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mendable/firecrawl-js": "4.51.0",
+    "@mozilla/readability": "0.6.0",
+    "@readbook/core": "workspace:*",
+    "fflate": "0.8.3",
+    "linkedom": "0.18.12",
+    "marked": "18.0.6",
+    "sanitize-html": "2.18.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.2",
+    "@types/sanitize-html": "2.16.0"
+  }
+}

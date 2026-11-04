@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in Readbook doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time! Please **don't paste API keys** or private links.
+        Running `pnpm run doctor` and including its output helps a lot (it never prints secrets).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Paste https://example.com/some-article
+        2. Open it in the reader
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: url
+    attributes:
+      label: Link that fails to extract (if any)
+      description: Only if it's public. Extraction bugs are much easier to fix with the URL.
+      placeholder: https://
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run Readbook?
+      options:
+        - pnpm dev
+        - pnpm start (production build)
+        - Docker / Docker Compose
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: firecrawl
+    attributes:
+      label: Is a Firecrawl key configured?
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`pnpm run doctor` output"
+      render: text
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS and browser
+      placeholder: macOS 15, Safari 18
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server logs or browser console errors
+      render: text

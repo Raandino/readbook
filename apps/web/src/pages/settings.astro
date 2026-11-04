@@ -1,0 +1,622 @@
+---
+/**
+ * settings.astro — configure Readbook without touching .env, and back up or
+ * restore the shelf.
+ *
+ * Every value is server-rendered, so the page reads correctly without JS; the
+ * bundled script below only adds saving (PUT /api/settings) and restore
+ * (POST /api/backup) with calm inline status messages. Forms are method=post
+ * and their controls render disabled until the script enables them, so an
+ * early or script-less submit can never put the Firecrawl key in a URL.
+ *
+ * Precedence shown here mirrors lib/config.ts: saved here > environment > default.
+ */
+import Base from "../layouts/Base.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import ControlRail from "../components/ControlRail.astro";
+import "../styles/settings.css";
+import { READBOOK_HOMEPAGE, READBOOK_USER_AGENT, READBOOK_VERSION } from "@readbook/core";
+import { countByStatus, countHighlights, resolveDbPath } from "@readbook/db";
+import {
+  allowPrivateNetwork,
+  describeFirecrawlKey,
+  firecrawlProxy,
+  userAgent,
+  type ConfigSource,
+} from "../lib/config";
+
+export const prerender = false;
+
+const key = describeFirecrawlKey();
+const proxy = firecrawlProxy();
+const ua = userAgent();
+const privateNet = allowPrivateNetwork();
+
+const counts = countByStatus();
+const highlightCount = countHighlights();
+const dbPath = resolveDbPath();
+
+/** Keep in sync with sourceText() in the script below. */
+function sourceText(source: ConfigSource, envName: string): string {
+  if (source === "settings") return "Saved here";
+  if (source === "env") return `From ${envName} in your environment`;
+  return "Default";
+}
+
+const keyText =
+  key.source === "settings"
+    ? "Using the key saved here."
+    : key.source === "env"
+      ? "Using FIRECRAWL_API_KEY from your environment. A key saved here takes precedence."
+      : "Not set. Readbook reads pages with its local reader only.";
+
+const stats = [
+  { key: "all", label: "Readings", value: counts.all },
+  { key: "unread", label: "Unread", value: counts.unread },
+  { key: "reading", label: "In progress", value: counts.reading },
+  { key: "read", label: "Read", value: counts.read },
+  { key: "archived", label: "Archived", value: counts.archived },
+  { key: "highlights", label: "Highlights", value: highlightCount },
+];
+---
+
+<Base title="Settings · Readbook">
+  <main class="shell settings">
+    <SiteHeader current="settings" />
+
+    <header class="settings-intro">
+      <h1>Settings</h1>
+      <p>
+        Saved in your local database and applied immediately, no restart needed. Values in
+        <code>.env</code>{" "}still work; anything saved here takes precedence.
+      </p>
+      <noscript>
+        <p class="settings-note">Changing settings needs JavaScript. The values below are shown read-only.</p>
+      </noscript>
+    </header>
+
+    <!-- ---- Extraction ---------------------------------------------------- -->
+    <section class="settings-section" aria-labelledby="extraction-heading">
+      <h2 id="extraction-heading">Extraction</h2>
+      <p class="settings-lede">How Readbook fetches the pages you paste.</p>
+
+      <div class="setting">
+        <div class="setting-head">
+          <label class="setting-label" for="fc-key">Firecrawl API key</label>
+          <span class="setting-pill" id="fc-pill" data-on={key.configured ? "true" : "false"}>
+            {key.configured ? "Configured" : "Not set"}
+          </span>
+        </div>
+        <p class="setting-help">
+          An optional, paid fallback for pages that only render with JavaScript. Readbook sends a page to
+          Firecrawl only when its own local reader can't extract it. Get a key at{" "}
+          <a href="https://www.firecrawl.dev" target="_blank" rel="noopener noreferrer">firecrawl.dev</a>.
+        </p>
+        <p class="setting-current" id="fc-current">
+          <span id="fc-current-text">{keyText}</span>{" "}
+          <code id="fc-preview" hidden={!key.preview}>{key.preview ?? ""}</code>
+        </p>
+        <form class="setting-form" id="fc-form" method="post">
+          <input
+            class="setting-input"
+            type="password"
+            id="fc-key"
+            name="firecrawlApiKey"
+            placeholder={key.configured ? "Paste a new key to replace it" : "fc-…"}
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="200"
+            disabled
+            data-needs-js
+          />
+          <div class="setting-actions">
+            <button class="btn btn-primary" type="submit" disabled data-needs-js>Save key</button>
+            <button class="btn" type="button" id="fc-remove" hidden={key.source !== "settings"} disabled data-needs-js>
+              Remove
+            </button>
+          </div>
+        </form>
+        <p class="setting-status" id="fc-status" role="status"></p>
+      </div>
+
+      <div class="setting">
+        <div class="setting-head">
+          <label class="setting-label" for="fc-proxy">Firecrawl proxy</label>
+          <span class="setting-source" id="proxy-source">{sourceText(proxy.source, "READBOOK_FIRECRAWL_PROXY")}</span>
+        </div>
+        <select class="setting-input setting-select" id="fc-proxy" name="firecrawlProxy" disabled data-needs-js>
+          <option value="basic" selected={proxy.value === "basic"}>Basic (default)</option>
+          <option value="auto" selected={proxy.value === "auto"}>
+            Auto — allow Firecrawl's stealth proxy when a site blocks it (costs more credits)
+          </option>
+        </select>
+        <p class="setting-status" id="proxy-status" role="status"></p>
+      </div>
+
+      <div class="setting">
+        <div class="setting-head">
+          <label class="setting-label" for="ua-input">User-Agent</label>
+          <span class="setting-source" id="ua-source">{sourceText(ua.source, "READBOOK_USER_AGENT")}</span>
+        </div>
+        <p class="setting-help">
+          Leave empty to use Readbook's honest default, which tells site owners what is fetching their page:
+          <code class="setting-code-block">{READBOOK_USER_AGENT}</code>
+          Whatever you choose, you are responsible for respecting each site's terms.
+        </p>
+        <p class="setting-current" id="ua-env" hidden={ua.source !== "env"}>
+          Currently from your environment:{" "}<code id="ua-env-value">{ua.source === "env" ? ua.value : ""}</code>
+        </p>
+        <form class="setting-form" id="ua-form" method="post">
+          <input
+            class="setting-input"
+            type="text"
+            id="ua-input"
+            name="userAgent"
+            value={ua.source === "settings" ? (ua.value ?? "") : ""}
+            placeholder="Readbook's default"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="300"
+            disabled
+            data-needs-js
+          />
+          <div class="setting-actions">
+            <button class="btn btn-primary" type="submit" disabled data-needs-js>Save</button>
+            <button class="btn" type="button" id="ua-reset" hidden={ua.source !== "settings"} disabled data-needs-js>
+              Use default
+            </button>
+          </div>
+        </form>
+        <p class="setting-status" id="ua-status" role="status"></p>
+      </div>
+
+      <div class="setting">
+        <div class="setting-head">
+          <label class="setting-label setting-switch-label" for="private-net">
+            <input
+              class="setting-switch"
+              type="checkbox"
+              role="switch"
+              id="private-net"
+              name="allowPrivateNetwork"
+              checked={privateNet.value}
+              aria-describedby="private-net-warning"
+              disabled
+              data-needs-js
+            />
+            Allow private network addresses
+          </label>
+          <span class="setting-source" id="private-source">
+            {sourceText(privateNet.source, "READBOOK_ALLOW_PRIVATE_NETWORK")}
+          </span>
+        </div>
+        <p class="setting-warning" id="private-net-warning">
+          Off by default. Turning this on lets pasted links reach <code>localhost</code>,{" "}your home network, and
+          intranet addresses, so a malicious link could make Readbook probe devices on your network. Only enable
+          it if you read from something like a home-lab wiki.
+        </p>
+        <p class="setting-status" id="private-status" role="status"></p>
+      </div>
+    </section>
+
+    <!-- ---- Your data ----------------------------------------------------- -->
+    <section class="settings-section" aria-labelledby="data-heading">
+      <h2 id="data-heading">Your data</h2>
+      <p class="settings-lede">Everything lives in one SQLite file on this machine.</p>
+
+      <dl class="settings-facts">
+        <div>
+          <dt>Database</dt>
+          <dd>
+            {dbPath === ":memory:" ? "In memory (nothing is saved to disk)" : <code class="settings-path">{dbPath}</code>}
+          </dd>
+        </div>
+      </dl>
+
+      <ul class="settings-stats" aria-label="What's on your shelf">
+        {
+          stats.map((stat) => (
+            <li>
+              <span class="settings-stat-value" data-stat={stat.key}>
+                {stat.value.toLocaleString("en-US")}
+              </span>
+              <span class="settings-stat-label">{stat.label}</span>
+            </li>
+          ))
+        }
+      </ul>
+
+      <div class="setting">
+        <div class="setting-head">
+          <h3 class="setting-label">Backup</h3>
+        </div>
+        <p class="setting-help">
+          One JSON file with every reading, its progress and notes, and all your highlights. Settings (including
+          your Firecrawl key) are not included.
+        </p>
+        <div class="setting-actions">
+          <a class="btn btn-primary" href="/api/backup" download>Download backup (.json)</a>
+          <a class="btn" href="/api/highlights/export">Export highlights as Markdown</a>
+        </div>
+      </div>
+
+      <div class="setting">
+        <div class="setting-head">
+          <label class="setting-label" for="restore-file">Restore from backup</label>
+        </div>
+        <p class="setting-help">
+          Merges into your shelf: anything already here is kept, and only readings and highlights you don't
+          have yet are added. Safe to run more than once.
+        </p>
+        <form class="setting-form" id="restore-form" method="post">
+          <input
+            class="setting-file"
+            type="file"
+            id="restore-file"
+            name="backup"
+            accept=".json,application/json"
+            disabled
+            data-needs-js
+          />
+          <div class="setting-actions">
+            <button class="btn" type="submit" id="restore-submit" disabled data-needs-js>Restore</button>
+          </div>
+        </form>
+        <p class="setting-status" id="restore-status" role="status"></p>
+      </div>
+    </section>
+
+    <!-- ---- About --------------------------------------------------------- -->
+    <section class="settings-section" aria-labelledby="about-heading">
+      <h2 id="about-heading">About</h2>
+      <dl class="settings-facts">
+        <div>
+          <dt>Version</dt>
+          <dd>Readbook {READBOOK_VERSION}</dd>
+        </div>
+        <div>
+          <dt>Source</dt>
+          <dd>
+            <a href={READBOOK_HOMEPAGE} target="_blank" rel="noopener noreferrer">
+              {READBOOK_HOMEPAGE.replace(/^https:\/\//, "")}
+            </a>
+          </dd>
+        </div>
+        <div>
+          <dt>License</dt>
+          <dd>MIT</dd>
+        </div>
+        <div>
+          <dt>Privacy</dt>
+          <dd>
+            Everything you save stays on this machine. Images inside articles load from their original sites (no
+            referrer is sent). Firecrawl receives a page's URL only when you've added a key and the local reader
+            couldn't read that page.
+          </dd>
+        </div>
+      </dl>
+    </section>
+  </main>
+
+  <ControlRail variant="feed" />
+</Base>
+
+<script>
+  // Bundled module script (not is:inline) so the strict CSP covers it.
+  type Source = "settings" | "env" | "default";
+
+  interface SettingsView {
+    firecrawlApiKey: { configured: boolean; source: Source; preview: string | null };
+    firecrawlProxy: { value: "basic" | "auto"; source: Source };
+    allowPrivateNetwork: { value: boolean; source: Source };
+    userAgent: { value: string | null; source: Source };
+    defaultUserAgent: string;
+  }
+
+  interface RestoreResponse {
+    readings: { added: number; skipped: number };
+    highlights: { added: number; skipped: number };
+    totals: { readings: Record<string, number>; highlights: number };
+  }
+
+  const byId = <T extends HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
+
+  /** Keep in sync with sourceText() in the page frontmatter. */
+  function sourceText(source: Source, envName: string): string {
+    if (source === "settings") return "Saved here";
+    if (source === "env") return `From ${envName} in your environment`;
+    return "Default";
+  }
+
+  const statusTimers = new WeakMap<HTMLElement, number>();
+
+  function setStatus(el: HTMLElement | null, message: string, state?: "error" | "busy"): void {
+    if (!el) return;
+    if (state) el.dataset.state = state;
+    else delete el.dataset.state;
+    window.clearTimeout(statusTimers.get(el));
+    if (el.textContent !== message) {
+      el.textContent = message;
+      return;
+    }
+    // Same words as last time ("Key saved." twice): screen readers ignore an
+    // unchanged live region, so blank it briefly to have it announced again.
+    el.textContent = "";
+    statusTimers.set(
+      el,
+      window.setTimeout(() => {
+        el.textContent = message;
+      }, 60),
+    );
+  }
+
+  function errorMessage(data: unknown, fallback: string): string {
+    if (data && typeof data === "object" && "error" in data && typeof data.error === "string") return data.error;
+    return fallback;
+  }
+
+  /**
+   * Reflect a fresh GET/PUT response everywhere on the page. Deliberately
+   * leaves text fields alone, so saving one setting never wipes what you are
+   * typing into another; their own handlers update them.
+   */
+  function render(view: SettingsView): void {
+    const key = view.firecrawlApiKey;
+    const pill = byId("fc-pill");
+    if (pill) {
+      pill.dataset.on = String(key.configured);
+      pill.textContent = key.configured ? "Configured" : "Not set";
+    }
+    const keyText = byId("fc-current-text");
+    if (keyText) {
+      keyText.textContent =
+        key.source === "settings"
+          ? "Using the key saved here."
+          : key.source === "env"
+            ? "Using FIRECRAWL_API_KEY from your environment. A key saved here takes precedence."
+            : "Not set. Readbook reads pages with its local reader only.";
+    }
+    const preview = byId("fc-preview");
+    if (preview) {
+      preview.textContent = key.preview ?? "";
+      preview.hidden = !key.preview;
+    }
+    const keyInput = byId<HTMLInputElement>("fc-key");
+    if (keyInput) keyInput.placeholder = key.configured ? "Paste a new key to replace it" : "fc-…";
+    const remove = byId("fc-remove");
+    if (remove) remove.hidden = key.source !== "settings";
+
+    const proxy = byId<HTMLSelectElement>("fc-proxy");
+    if (proxy) proxy.value = view.firecrawlProxy.value;
+    const proxySource = byId("proxy-source");
+    if (proxySource) proxySource.textContent = sourceText(view.firecrawlProxy.source, "READBOOK_FIRECRAWL_PROXY");
+
+    const ua = view.userAgent;
+    const uaSource = byId("ua-source");
+    if (uaSource) uaSource.textContent = sourceText(ua.source, "READBOOK_USER_AGENT");
+    const uaEnv = byId("ua-env");
+    if (uaEnv) uaEnv.hidden = ua.source !== "env";
+    const uaEnvValue = byId("ua-env-value");
+    if (uaEnvValue) uaEnvValue.textContent = ua.source === "env" ? (ua.value ?? "") : "";
+    const uaReset = byId("ua-reset");
+    if (uaReset) uaReset.hidden = ua.source !== "settings";
+
+    const privateNet = byId<HTMLInputElement>("private-net");
+    if (privateNet) privateNet.checked = view.allowPrivateNetwork.value;
+    const privateSource = byId("private-source");
+    if (privateSource) {
+      privateSource.textContent = sourceText(view.allowPrivateNetwork.source, "READBOOK_ALLOW_PRIVATE_NETWORK");
+    }
+  }
+
+  // Saves run one at a time, in order: flipping a switch twice quickly can
+  // never let the first (stale) response land last and undo the second.
+  let queue: Promise<unknown> = Promise.resolve();
+  function enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = queue.then(task, task);
+    queue = run.catch(() => undefined);
+    return run;
+  }
+
+  /** PUT a partial update; renders and returns the new view, or null on failure. */
+  function save(patch: Record<string, unknown>, status: HTMLElement | null, done: string): Promise<SettingsView | null> {
+    setStatus(status, "Saving…", "busy");
+    return enqueue(async () => {
+      try {
+        const res = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const data: unknown = await res.json().catch(() => null);
+        if (!res.ok || !data) {
+          setStatus(status, errorMessage(data, "Couldn't save that. Try again."), "error");
+          return null;
+        }
+        const view = data as SettingsView;
+        render(view);
+        setStatus(status, done);
+        return view;
+      } catch {
+        setStatus(status, "Couldn't reach Readbook. Is the server still running?", "error");
+        return null;
+      }
+    });
+  }
+
+  /**
+   * Run `fn` once at a time for a group of buttons. Uses aria-disabled rather
+   * than `disabled`: disabling the focused button would throw keyboard focus
+   * back to the top of the page.
+   */
+  async function once(controls: Array<HTMLElement | null>, fn: () => Promise<unknown>): Promise<void> {
+    if (controls.some((c) => c?.getAttribute("aria-disabled") === "true")) return;
+    for (const c of controls) c?.setAttribute("aria-disabled", "true");
+    try {
+      await fn();
+    } finally {
+      for (const c of controls) c?.removeAttribute("aria-disabled");
+    }
+  }
+
+  // Controls render disabled so a click before this script loads (or without
+  // JS) can't submit a plain form, which would put the key in the URL.
+  for (const el of document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
+    "[data-needs-js]",
+  )) {
+    el.disabled = false;
+  }
+
+  // ---- Firecrawl key ----
+  const fcForm = byId<HTMLFormElement>("fc-form");
+  const fcInput = byId<HTMLInputElement>("fc-key");
+  const fcRemove = byId<HTMLButtonElement>("fc-remove");
+  const fcStatus = byId("fc-status");
+  const fcSubmit = fcForm?.querySelector<HTMLButtonElement>('button[type="submit"]') ?? null;
+
+  fcForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = fcInput?.value.trim() ?? "";
+    if (!value) {
+      setStatus(fcStatus, "Paste a key first.", "error");
+      fcInput?.focus();
+      return;
+    }
+    void once([fcSubmit, fcRemove], async () => {
+      // Clear the field once saved: the key is never shown again.
+      if ((await save({ firecrawlApiKey: value }, fcStatus, "Key saved.")) && fcInput) fcInput.value = "";
+    });
+  });
+
+  fcRemove?.addEventListener("click", () => {
+    void once([fcSubmit, fcRemove], async () => {
+      const view = await save({ firecrawlApiKey: null }, fcStatus, "Saved key removed.");
+      if (!view) return;
+      // The button just hid itself; keep keyboard focus somewhere sensible.
+      fcInput?.focus();
+      // Say what happens next: a key from the environment may still be in effect.
+      if (view.firecrawlApiKey.source === "env") {
+        setStatus(fcStatus, "Saved key removed. Now using the key from your environment.");
+      }
+    });
+  });
+
+  // ---- Proxy mode (saves on change) ----
+  const proxy = byId<HTMLSelectElement>("fc-proxy");
+  const proxyStatus = byId("proxy-status");
+  proxy?.addEventListener("change", () => {
+    const label = proxy.value === "auto" ? "Auto proxy on." : "Basic proxy.";
+    void save({ firecrawlProxy: proxy.value }, proxyStatus, `Saved. ${label}`);
+  });
+
+  // ---- User-Agent ----
+  const uaForm = byId<HTMLFormElement>("ua-form");
+  const uaInput = byId<HTMLInputElement>("ua-input");
+  const uaReset = byId<HTMLButtonElement>("ua-reset");
+  const uaStatus = byId("ua-status");
+  const uaSubmit = uaForm?.querySelector<HTMLButtonElement>('button[type="submit"]') ?? null;
+
+  /** Show what is now saved (the server trims; "" = Readbook's default). */
+  function showSavedUa(view: SettingsView): void {
+    if (uaInput) uaInput.value = view.userAgent.source === "settings" ? (view.userAgent.value ?? "") : "";
+  }
+
+  uaForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = uaInput?.value.trim() ?? "";
+    void once([uaSubmit, uaReset], async () => {
+      const view = await save(
+        { userAgent: value || null },
+        uaStatus,
+        value ? "User-Agent saved." : "Using Readbook's default.",
+      );
+      if (view) showSavedUa(view);
+    });
+  });
+
+  uaReset?.addEventListener("click", () => {
+    void once([uaSubmit, uaReset], async () => {
+      const view = await save({ userAgent: null }, uaStatus, "Using Readbook's default.");
+      if (!view) return;
+      showSavedUa(view);
+      uaInput?.focus(); // the button just hid itself
+    });
+  });
+
+  // ---- Private network (saves on toggle) ----
+  const privateNet = byId<HTMLInputElement>("private-net");
+  const privateStatus = byId("private-status");
+  privateNet?.addEventListener("change", () => {
+    const on = privateNet.checked;
+    void save(
+      { allowPrivateNetwork: on },
+      privateStatus,
+      on ? "On. Links may now reach private network addresses." : "Off. Private network addresses are blocked.",
+    ).then((view) => {
+      // Not saved: put the switch back, unless a later toggle already moved it.
+      if (!view && privateNet.checked === on) privateNet.checked = !on;
+    });
+  });
+
+  // ---- Restore ----
+  const restoreForm = byId<HTMLFormElement>("restore-form");
+  const restoreFile = byId<HTMLInputElement>("restore-file");
+  const restoreSubmit = byId<HTMLButtonElement>("restore-submit");
+  const restoreStatus = byId("restore-status");
+
+  /** Matches MAX_BACKUP_BYTES in /api/backup; checked here to skip a doomed upload. */
+  const MAX_BACKUP_BYTES = 200 * 1024 * 1024;
+
+  const plural = (n: number, word: string): string => `${n.toLocaleString("en-US")} ${word}${n === 1 ? "" : "s"}`;
+
+  function updateStats(totals: RestoreResponse["totals"]): void {
+    const values: Record<string, number | undefined> = { ...totals.readings, highlights: totals.highlights };
+    for (const el of document.querySelectorAll<HTMLElement>("[data-stat]")) {
+      const n = values[el.dataset.stat ?? ""];
+      if (typeof n === "number") el.textContent = n.toLocaleString("en-US");
+    }
+  }
+
+  restoreForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (restoreSubmit?.getAttribute("aria-disabled") === "true") return;
+    const file = restoreFile?.files?.[0];
+    if (!file) {
+      setStatus(restoreStatus, "Choose a backup file first.", "error");
+      restoreFile?.focus();
+      return;
+    }
+    if (file.size > MAX_BACKUP_BYTES) {
+      setStatus(restoreStatus, "That backup is larger than 200 MB.", "error");
+      return;
+    }
+    if (!window.confirm(`Restore from "${file.name}"? Nothing on your shelf is replaced; only new items are added.`)) {
+      return;
+    }
+    void once([restoreSubmit], async () => {
+      setStatus(restoreStatus, "Restoring…", "busy");
+      try {
+        const res = await fetch("/api/backup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: file,
+        });
+        const data: unknown = await res.json().catch(() => null);
+        if (!res.ok || !data) {
+          const fallback = res.status === 413 ? "That backup is too large to upload." : "Couldn't restore that file.";
+          setStatus(restoreStatus, errorMessage(data, fallback), "error");
+          return;
+        }
+        const { readings, highlights, totals } = data as RestoreResponse;
+        let message = `Added ${plural(readings.added, "reading")} and ${plural(highlights.added, "highlight")}.`;
+        if (readings.skipped > 0) message += ` ${plural(readings.skipped, "reading")} already on your shelf.`;
+        if (highlights.skipped > 0) message += ` ${plural(highlights.skipped, "highlight")} skipped.`;
+        setStatus(restoreStatus, message);
+        updateStats(totals);
+        if (restoreFile) restoreFile.value = "";
+      } catch {
+        setStatus(restoreStatus, "Couldn't reach Readbook. Is the server still running?", "error");
+      }
+    });
+  });
+</script>

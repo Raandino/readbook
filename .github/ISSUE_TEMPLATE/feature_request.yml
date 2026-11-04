@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest an idea for Readbook.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Readbook is deliberately small: a calm, single-reader, local-first shelf.
+        No accounts, feeds, social features or tracking. Ideas that keep it calm are very welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation, not the solution yet. "When I ..., I can't ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Fit
+      options:
+        - label: This keeps Readbook single-user and local-first (no accounts or cloud service required).
+        - label: I'd be willing to help implement it.

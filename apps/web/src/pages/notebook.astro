@@ -1,0 +1,191 @@
+---
+/**
+ * notebook.astro — every passage you've marked, across the whole shelf.
+ *
+ * Highlights grouped by Reading (most recently highlighted first), each with
+ * its color accent and note, plus Readings that only carry a note of their
+ * own. A client-side filter narrows the page; "Export as Markdown" downloads
+ * the lot (see /api/highlights/export and lib/notebook.ts).
+ */
+import Base from "../layouts/Base.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import ControlRail from "../components/ControlRail.astro";
+import { listAllHighlights, listReadingSummaries } from "@readbook/db";
+import { buildNotebook, displayHost, httpUrl } from "../lib/notebook";
+import "../styles/highlights.css";
+
+export const prerender = false;
+
+const groups = buildNotebook(listAllHighlights(), listReadingSummaries());
+const highlightCount = groups.reduce((n, g) => n + g.highlights.length, 0);
+
+const dateLabel = (iso: string): string =>
+  new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+---
+
+<Base title="Notebook · Readbook">
+  <main class="shell">
+    <SiteHeader current="notebook" tagline="Every passage you've marked, in one place." />
+    <h1 class="sr-only">Notebook</h1>
+
+    {
+      groups.length === 0 ? (
+        <div class="empty">
+          <h2>Your notebook is empty</h2>
+          <p>Highlights and notes you make while reading collect here.</p>
+          <ol class="nb-empty-steps">
+            <li>Open anything on your shelf.</li>
+            <li>Select a passage, then pick a color (or press H).</li>
+            <li>Click a highlight to add a note, or jot down thoughts on the whole piece.</li>
+          </ol>
+          <p>
+            <a class="nb-empty-link" href="/">Go to your shelf</a>
+          </p>
+        </div>
+      ) : (
+        <>
+          <div class="nb-bar">
+            <label class="rb-sr-only" for="nb-filter">
+              Filter highlights and notes
+            </label>
+            <input
+              class="nb-filter"
+              id="nb-filter"
+              type="search"
+              placeholder="Filter highlights and notes…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <a class="btn nb-export" href="/api/highlights/export" download>
+              Export as Markdown
+            </a>
+          </div>
+          <p class="nb-summary" id="nb-summary" aria-live="polite">
+            {plural(highlightCount, "highlight", "highlights")} from {plural(groups.length, "reading", "readings")}
+          </p>
+
+          <ol class="nb-groups" id="nb-groups">
+            {groups.map(({ reading, highlights }) => {
+              const original = httpUrl(reading.url);
+              return (
+                <li class="nb-group" data-nb-group>
+                  <header>
+                    <h2 class="nb-group-title" data-nb-text>
+                      <a href={`/read/${encodeURIComponent(reading.id)}`}>{reading.title}</a>
+                    </h2>
+                    <p class="nb-meta">
+                      {reading.author && <span data-nb-text>{reading.author}</span>}
+                      {reading.siteName && <span data-nb-text>{reading.siteName}</span>}
+                      {highlights.length > 0 && <span>{plural(highlights.length, "highlight", "highlights")}</span>}
+                      {original && (
+                        <a href={original.href} target="_blank" rel="noopener noreferrer">
+                          {displayHost(original)}&nbsp;↗
+                        </a>
+                      )}
+                    </p>
+                  </header>
+
+                  <ul class="nb-items">
+                    {reading.note?.trim() && (
+                      <li class="nb-item nb-reading-note" data-nb-item>
+                        <p class="nb-label">Your notes</p>
+                        <p class="nb-note" data-nb-text>{reading.note}</p>
+                      </li>
+                    )}
+                    {highlights.map((h) => (
+                      <li class="nb-item" data-nb-item data-color={h.color}>
+                        <blockquote class="nb-quote">
+                          <span class="nb-quote-text" data-nb-text>{h.quote}</span>
+                        </blockquote>
+                        {h.note && (
+                          <p class="nb-note" data-nb-text>{h.note}</p>
+                        )}
+                        <p class="nb-hl-meta">
+                          <time datetime={h.createdAt}>{dateLabel(h.createdAt)}</time>
+                          <a href={`/read/${encodeURIComponent(reading.id)}#hl-${encodeURIComponent(h.id)}`}>
+                            Jump to passage →
+                          </a>
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
+          </ol>
+          <p class="nb-nomatch" id="nb-nomatch" hidden>
+            Nothing in your notebook matches that.
+          </p>
+        </>
+      )
+    }
+  </main>
+
+  <ControlRail variant="feed" />
+
+  <script>
+    // Client-side filter: hide items (and whole groups) whose text doesn't match.
+    // A group whose title/author/site matches keeps all of its items.
+    const input = document.getElementById("nb-filter") as HTMLInputElement | null;
+    const summary = document.getElementById("nb-summary");
+    const noMatch = document.getElementById("nb-nomatch");
+    const groups = Array.from(document.querySelectorAll<HTMLElement>("[data-nb-group]"));
+    const initialSummary = summary?.textContent ?? "";
+
+    const textOf = (el: Element): string =>
+      Array.from(el.querySelectorAll("[data-nb-text]"))
+        .map((t) => t.textContent ?? "")
+        .join(" ")
+        .toLowerCase();
+
+    const index = groups.map((group) => {
+      const header = group.querySelector("header");
+      return {
+        group,
+        header: header ? textOf(header) : "",
+        items: Array.from(group.querySelectorAll<HTMLElement>("[data-nb-item]")).map((item) => ({
+          item,
+          text: textOf(item),
+        })),
+      };
+    });
+
+    function apply(): void {
+      const terms = (input?.value ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+      const matches = (text: string): boolean => terms.every((t) => text.includes(t));
+      let shownItems = 0;
+      let shownGroups = 0;
+      for (const { group, header, items } of index) {
+        const headerHit = terms.length === 0 || matches(header);
+        let any = false;
+        for (const { item, text } of items) {
+          const show = headerHit || matches(`${header} ${text}`);
+          item.hidden = !show;
+          if (show) {
+            any = true;
+            shownItems++;
+          }
+        }
+        group.hidden = !any;
+        if (any) shownGroups++;
+      }
+      if (noMatch) noMatch.hidden = shownGroups > 0;
+      if (summary) {
+        summary.textContent =
+          terms.length === 0
+            ? initialSummary
+            : `${shownItems} ${shownItems === 1 ? "match" : "matches"} in ${shownGroups} ${shownGroups === 1 ? "reading" : "readings"}`;
+      }
+    }
+
+    input?.addEventListener("input", apply);
+    input?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && input.value) {
+        input.value = "";
+        apply();
+      }
+    });
+  </script>
+</Base>

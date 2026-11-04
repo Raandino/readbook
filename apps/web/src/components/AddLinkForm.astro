@@ -1,0 +1,401 @@
+---
+/**
+ * AddLinkForm — the shelf's one way in: paste a link, write a note, or upload
+ * an EPUB/Markdown file. Everything POSTs to /api/add.
+ *
+ * Three modes as an accessible tablist. Progressive: the form has a real
+ * action, and with scripting off the tabs disappear and the link + file fields
+ * show together (the note needs JS, since it is sent as JSON). With JS, the
+ * script below gives loading/error feedback, accepts files dropped anywhere on
+ * the page, and reloads the shelf with the new card highlighted.
+ */
+
+interface Props {
+  /** A server-rendered confirmation, e.g. after a reload into `/?added=<id>`. */
+  notice?: { text: string; link?: { href: string; label: string } } | null;
+}
+
+const { notice = null } = Astro.props;
+
+const FILE_ACCEPT = ".epub,.md,.markdown,.mdown,.mkd,application/epub+zip,text/markdown,text/x-markdown";
+
+const modes = [
+  { key: "link", label: "Link" },
+  { key: "note", label: "Write a note" },
+  { key: "file", label: "Upload file" },
+] as const;
+---
+
+<form
+  class="add-form"
+  id="add-form"
+  method="post"
+  action="/api/add"
+  enctype="multipart/form-data"
+  data-mode="link"
+  novalidate
+>
+  <div class="add-tabs" role="tablist" aria-label="Add to your shelf">
+    {
+      modes.map((mode, i) => (
+        <button
+          type="button"
+          class="add-tab"
+          role="tab"
+          id={`add-tab-${mode.key}`}
+          aria-controls={`add-panel-${mode.key}`}
+          aria-selected={i === 0 ? "true" : "false"}
+          tabindex={i === 0 ? 0 : -1}
+          data-mode={mode.key}
+        >
+          {mode.label}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="add-panel" id="add-panel-link" role="tabpanel" aria-labelledby="add-tab-link" data-panel="link">
+    <div class="add-url-row">
+      <label class="sr-only" for="add-url">Link to read</label>
+      <input
+        type="url"
+        name="url"
+        id="add-url"
+        placeholder="Paste any link — Substack, a blog, Reddit, an X thread…"
+        autocomplete="off"
+        spellcheck="false"
+        enterkeyhint="go"
+      />
+      <button class="btn btn-primary" type="submit" data-submit="link">Add</button>
+    </div>
+  </div>
+
+  <div class="add-panel" id="add-panel-note" role="tabpanel" aria-labelledby="add-tab-note" data-panel="note" hidden>
+    <label class="sr-only" for="add-note-title">Note title</label>
+    <input type="text" id="add-note-title" placeholder="Title (optional)" maxlength="300" autocomplete="off" />
+    <label class="sr-only" for="add-note-body">Note</label>
+    <textarea
+      id="add-note-body"
+      rows="7"
+      placeholder="Write in Markdown — **bold**, _italic_, # headings, lists, links…"
+      aria-describedby="add-note-hint"></textarea>
+    <div class="add-panel-foot">
+      <span class="add-hint" id="add-note-hint">
+        Markdown supported · <kbd data-mod-key>Ctrl</kbd> + <kbd>Enter</kbd> to save
+      </span>
+      <button class="btn btn-primary" type="submit" data-submit="note">Save note</button>
+    </div>
+  </div>
+
+  <div class="add-panel" id="add-panel-file" role="tabpanel" aria-labelledby="add-tab-file" data-panel="file" hidden>
+    <label class="add-drop" for="add-file">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5M12 18v-6M9.5 14.5 12 12l2.5 2.5" />
+      </svg>
+      <span class="add-drop-title" id="add-file-name">Drop an EPUB or Markdown file here</span>
+      <span class="add-drop-sub">or click to choose one · up to 50 MB</span>
+      <input type="file" name="file" id="add-file" accept={FILE_ACCEPT} />
+    </label>
+    <div class="add-panel-foot">
+      <span class="add-hint">Books and documents stay on your machine.</span>
+      <button class="btn btn-primary" type="submit" data-submit="file">Add file</button>
+    </div>
+  </div>
+</form>
+<p class="add-status" id="add-status" role="status" aria-live="polite">
+  {
+    notice && (
+      <>
+        {notice.text}
+        {notice.link && (
+          <>
+            {" "}
+            <a href={notice.link.href}>{notice.link.label}</a>
+          </>
+        )}
+      </>
+    )
+  }
+</p>
+
+<script>
+  // Bundled module (not is:inline) so the strict CSP covers it.
+  type Mode = "link" | "note" | "file";
+
+  const MAX_FILE_BYTES = 50 * 1024 * 1024;
+  const FILE_PATTERN = /\.(epub|md|markdown|mdown|mkd)$/i;
+
+  const form = document.getElementById("add-form") as HTMLFormElement | null;
+  const status = document.getElementById("add-status");
+  const urlInput = document.getElementById("add-url") as HTMLInputElement | null;
+  const noteTitle = document.getElementById("add-note-title") as HTMLInputElement | null;
+  const noteBody = document.getElementById("add-note-body") as HTMLTextAreaElement | null;
+  const fileInput = document.getElementById("add-file") as HTMLInputElement | null;
+  const fileName = document.getElementById("add-file-name");
+
+  if (form && status && urlInput && noteTitle && noteBody && fileInput && fileName) {
+    const tabs = Array.from(form.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    const panels = Array.from(form.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
+    const submits = Array.from(form.querySelectorAll<HTMLButtonElement>("[data-submit]"));
+    const defaultFileLabel = fileName.textContent ?? "";
+    let busy = false;
+
+    const isMode = (value: string | undefined): value is Mode =>
+      value === "link" || value === "note" || value === "file";
+
+    const currentMode = (): Mode => {
+      const mode = form.dataset.mode;
+      return isMode(mode) ? mode : "link";
+    };
+
+    const firstField = (mode: Mode): HTMLElement =>
+      mode === "link" ? urlInput : mode === "note" ? (noteTitle.value ? noteBody : noteTitle) : fileInput;
+
+    function setStatus(message: string, state?: "busy" | "error"): void {
+      status!.textContent = message;
+      if (state) status!.setAttribute("data-state", state);
+      else status!.removeAttribute("data-state");
+    }
+
+    /**
+     * Point a field at the error message: aria-invalid plus the status line as
+     * part of its description, until the next edit to that field.
+     */
+    let invalidField: HTMLInputElement | HTMLTextAreaElement | null = null;
+    let invalidDescribedBy: string | null = null;
+
+    function clearInvalid(): void {
+      if (!invalidField) return;
+      invalidField.removeAttribute("aria-invalid");
+      if (invalidDescribedBy) invalidField.setAttribute("aria-describedby", invalidDescribedBy);
+      else invalidField.removeAttribute("aria-describedby");
+      invalidField.removeEventListener("input", clearInvalid);
+      invalidField = null;
+      invalidDescribedBy = null;
+    }
+
+    function markInvalid(field: HTMLInputElement | HTMLTextAreaElement): void {
+      clearInvalid();
+      invalidField = field;
+      invalidDescribedBy = field.getAttribute("aria-describedby");
+      field.setAttribute("aria-invalid", "true");
+      field.setAttribute("aria-describedby", [invalidDescribedBy, "add-status"].filter(Boolean).join(" "));
+      field.addEventListener("input", clearInvalid);
+    }
+
+    function selectMode(mode: Mode, opts: { focusTab?: boolean; focusField?: boolean } = {}): void {
+      form!.dataset.mode = mode;
+      for (const tab of tabs) {
+        const selected = tab.dataset.mode === mode;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        if (selected && opts.focusTab) tab.focus();
+      }
+      for (const panel of panels) panel.hidden = panel.dataset.panel !== mode;
+      if (status!.getAttribute("data-state") === "error") {
+        setStatus("");
+        clearInvalid();
+      }
+      if (opts.focusField) firstField(mode).focus();
+    }
+
+    // Tabs: click to switch; arrows/Home/End move between them (automatic activation).
+    form.querySelector('[role="tablist"]')?.addEventListener("keydown", (event) => {
+      const e = event as KeyboardEvent;
+      const index = tabs.findIndex((tab) => tab.dataset.mode === currentMode());
+      let next = -1;
+      if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
+      else if (e.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = tabs.length - 1;
+      const mode = tabs[next]?.dataset.mode;
+      if (!isMode(mode)) return;
+      e.preventDefault();
+      selectMode(mode, { focusTab: true });
+    });
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => {
+        const mode = tab.dataset.mode;
+        if (isMode(mode)) selectMode(mode, { focusField: true });
+      });
+    }
+
+    // Name the platform's modifier key in the note hint ("⌘" is not spoken
+    // reliably, so screen readers get the word instead).
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
+    form.querySelectorAll("[data-mod-key]").forEach((el) => {
+      if (!isMac) return;
+      const glyph = document.createElement("span");
+      glyph.setAttribute("aria-hidden", "true");
+      glyph.textContent = "⌘";
+      const word = document.createElement("span");
+      word.className = "sr-only";
+      word.textContent = "Command";
+      el.replaceChildren(glyph, word);
+    });
+
+    // Cmd/Ctrl+Enter saves from either note field. A plain Enter in the title
+    // moves on to the body instead of submitting a note with no text.
+    const onNoteKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Enter" || e.isComposing) return;
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      } else if (e.target === noteTitle && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        noteBody.focus();
+      }
+    };
+    noteTitle.addEventListener("keydown", onNoteKey);
+    noteBody.addEventListener("keydown", onNoteKey);
+
+    // ---- Files: chooser + drag-and-drop anywhere on the page ----------------
+    function describeFile(file: File | undefined): void {
+      fileName!.textContent = file ? file.name : defaultFileLabel;
+      form!.toggleAttribute("data-has-file", Boolean(file));
+    }
+
+    fileInput.addEventListener("change", () => describeFile(fileInput.files?.[0]));
+
+    const hasFiles = (e: DragEvent): boolean => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    let dragDepth = 0;
+    // The mode to return to if a drag leaves the page without dropping.
+    let modeBeforeDrag: Mode | null = null;
+
+    document.addEventListener("dragenter", (e) => {
+      if (!hasFiles(e) || busy) return;
+      dragDepth += 1;
+      if (dragDepth === 1) {
+        modeBeforeDrag = currentMode();
+        if (modeBeforeDrag !== "file") selectMode("file");
+      }
+      form.setAttribute("data-dragging", "");
+    });
+    document.addEventListener("dragover", (e) => {
+      if (!hasFiles(e)) return;
+      // Claim the drop so a missed target never navigates away to the raw file.
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = busy ? "none" : "copy";
+    });
+    document.addEventListener("dragleave", (e) => {
+      if (!hasFiles(e)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth > 0) return;
+      form.removeAttribute("data-dragging");
+      if (modeBeforeDrag && modeBeforeDrag !== currentMode()) selectMode(modeBeforeDrag);
+      modeBeforeDrag = null;
+    });
+    document.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth = 0;
+      modeBeforeDrag = null;
+      form.removeAttribute("data-dragging");
+      const files = e.dataTransfer?.files;
+      if (busy || !files || files.length === 0) return;
+      fileInput.files = files;
+      describeFile(files[0]);
+      selectMode("file");
+      form.scrollIntoView({ block: "nearest" });
+      form.querySelector<HTMLButtonElement>('[data-submit="file"]')?.focus({ preventScroll: true });
+    });
+
+    // ---- Submit -------------------------------------------------------------
+    function setBusy(on: boolean, label?: string): void {
+      busy = on;
+      form!.setAttribute("aria-busy", String(on));
+      for (const button of submits) {
+        button.disabled = on;
+        if (!button.dataset.label) button.dataset.label = button.textContent?.trim() ?? "";
+        button.textContent = on && label && button.dataset.submit === currentMode() ? label : button.dataset.label;
+      }
+    }
+
+    type Problem = { problem: string; field?: HTMLInputElement | HTMLTextAreaElement };
+
+    /** Build the request for the active mode, or explain what's missing (and where). */
+    function buildRequest(mode: Mode): { init: RequestInit; busy: string; label: string } | Problem {
+      if (mode === "note") {
+        const body = noteBody!.value;
+        if (!body.trim()) return { problem: "Write something first — the note is empty.", field: noteBody! };
+        return {
+          init: {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note: { title: noteTitle!.value.trim() || null, body } }),
+          },
+          busy: "Saving your note…",
+          label: "Saving…",
+        };
+      }
+      if (mode === "file") {
+        const file = fileInput!.files?.[0];
+        if (!file) return { problem: "Choose or drop an EPUB or Markdown file first." };
+        if (!FILE_PATTERN.test(file.name)) return { problem: "Only EPUB and Markdown files can be added." };
+        if (file.size > MAX_FILE_BYTES) return { problem: "Files must be 50 MB or smaller." };
+        const body = new FormData();
+        body.set("file", file);
+        return { init: { method: "POST", body }, busy: "Importing and cleaning the file…", label: "Uploading…" };
+      }
+      const url = urlInput!.value.trim();
+      if (!url) return { problem: "Paste a link first.", field: urlInput! };
+      return {
+        init: { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) },
+        busy: "Fetching and cleaning the article…",
+        label: "Reading…",
+      };
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (busy) return;
+      const mode = currentMode();
+      const request = buildRequest(mode);
+      if ("problem" in request) {
+        setStatus(request.problem, "error");
+        if (request.field) {
+          markInvalid(request.field);
+          request.field.focus();
+        } else {
+          firstField(mode).focus();
+        }
+        return;
+      }
+      clearInvalid();
+
+      setBusy(true, request.label);
+      setStatus(request.busy, "busy");
+      try {
+        const res = await fetch("/api/add", request.init);
+        const data = (await res.json().catch(() => ({}))) as { id?: unknown; deduped?: unknown; error?: unknown };
+        if (res.ok && typeof data.id === "string") {
+          setStatus(data.deduped ? "Already on your shelf." : "Added to your shelf.");
+          const params = new URLSearchParams({ added: data.id });
+          if (data.deduped) params.set("deduped", "1");
+          const href = `/?${params.toString()}`;
+          // The shelf script may hold a pending delete; it cancels this event
+          // and navigates itself once that has landed.
+          const go = new CustomEvent("readbook:navigate", { cancelable: true, detail: href });
+          if (document.dispatchEvent(go)) window.location.assign(href);
+          return;
+        }
+        const fallback = mode === "link" ? "Could not read that link. Try another." : "Could not add that. Please try again.";
+        setStatus(typeof data.error === "string" ? data.error : fallback, "error");
+      } catch {
+        setStatus("Network error — is Readbook still running? Please try again.", "error");
+      }
+      setBusy(false);
+      // Disabling the submit button may have dropped focus; put it back where the fix is.
+      if (!form.contains(document.activeElement)) firstField(mode).focus();
+    });
+
+    // Coming back via the back/forward cache: the page may still say "Reading…".
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted && busy) {
+        setBusy(false);
+        setStatus("");
+      }
+    });
+  }
+</script>

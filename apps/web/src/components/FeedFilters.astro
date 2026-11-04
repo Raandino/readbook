@@ -1,0 +1,81 @@
+---
+/**
+ * FeedFilters — the shelf's status tabs + search box.
+ *
+ * Plain links and a GET form, so filtering works without JS and every view is
+ * linkable (`/?status=archived&q=essay`). scripts/feed.ts layers on the
+ * keyboard niceties ("/" to focus search, Esc to clear) and keeps the counts
+ * in step as cards change status in place.
+ */
+import type { ReadingStatus } from "@readbook/core";
+
+type FeedFilter = ReadingStatus | "all";
+
+interface Props {
+  /** The active tab. */
+  current: FeedFilter;
+  /** The active search, already trimmed ("" when not searching). */
+  query: string;
+  /** Count per tab. "all" means everything except archived. */
+  counts: Record<FeedFilter, number>;
+}
+
+const { current, query, counts } = Astro.props;
+
+const tabs: { key: FeedFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "unread", label: "Unread" },
+  { key: "reading", label: "Reading" },
+  { key: "read", label: "Read" },
+  { key: "archived", label: "Archived" },
+];
+
+/** Build a shelf URL, keeping the search when switching tabs. */
+function hrefFor(status: FeedFilter): string {
+  const params = new URLSearchParams();
+  if (status !== "all") params.set("status", status);
+  if (query) params.set("q", query);
+  const qs = params.toString();
+  return qs ? `/?${qs}` : "/";
+}
+---
+
+<div class="feed-filters">
+  <nav class="filter-tabs" aria-label="Filter your shelf">
+    {
+      tabs.map((tab) => (
+        <a
+          class="filter-tab"
+          href={hrefFor(tab.key)}
+          aria-current={current === tab.key ? "page" : undefined}
+        >
+          {tab.label}{" "}
+          {/* The space keeps the accessible name "Unread 2", not "Unread2"; flex ignores it visually. */}
+          <span class="filter-count" data-count-for={tab.key}>{counts[tab.key]}</span>
+        </a>
+      ))
+    }
+  </nav>
+
+  <form class="feed-search" role="search" method="get" action="/">
+    {current !== "all" && <input type="hidden" name="status" value={current} />}
+    <label class="sr-only" for="feed-q">Search your shelf</label>
+    <svg class="feed-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+    <input
+      type="search"
+      name="q"
+      id="feed-q"
+      value={query}
+      placeholder="Search your shelf"
+      autocomplete="off"
+      spellcheck="false"
+      enterkeyhint="search"
+      maxlength="200"
+      aria-keyshortcuts="/"
+    />
+    <kbd class="feed-search-hint" aria-hidden="true">/</kbd>
+  </form>
+</div>

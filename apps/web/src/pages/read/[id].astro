@@ -1,0 +1,244 @@
+---
+/**
+ * read/[id].astro — the reader. One typography-obsessed surface for every kind
+ * of link. Marks an unread Reading "reading" on open, tracks scroll progress
+ * (so you resume where you left off), and flips it to "read" near the end.
+ *
+ * Also home to highlights + notes: select text to highlight it, click a
+ * highlight to edit it, and open "Highlights & notes" for the list plus a note
+ * on the whole piece. Behavior lives in scripts/reader.ts + scripts/highlighter.ts;
+ * server data reaches them through data-* attributes (the CSP forbids inline scripts).
+ */
+import Base from "../../layouts/Base.astro";
+import ControlRail from "../../components/ControlRail.astro";
+import { HIGHLIGHT_COLORS } from "@readbook/core";
+import { getReading, listHighlights } from "@readbook/db";
+import { displayHost, httpUrl } from "../../lib/notebook";
+import "../../styles/highlights.css";
+
+export const prerender = false;
+
+const { id } = Astro.params;
+const reading = id ? getReading(id) : null;
+
+if (!reading) {
+  // The 404 page sets the status itself; rewriting keeps the URL as typed.
+  return Astro.rewrite("/404");
+}
+
+const highlights = listHighlights(reading.id);
+
+// Build the byline from whatever this source happened to know. Sources hand
+// us all sorts of date strings; an unparseable one is left out, not shown as
+// "Invalid Date".
+const published = reading.publishedAt ? new Date(reading.publishedAt) : null;
+const publishedLabel =
+  published && !Number.isNaN(published.getTime())
+    ? published.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+    : null;
+
+const bylineParts = [
+  reading.author,
+  reading.siteName,
+  publishedLabel,
+  `${reading.readingMinutes} min read`,
+].filter((part): part is string => Boolean(part));
+
+/** Whitespace-collapsed, lowercased text for a loose "same words?" comparison. */
+const comparable = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase();
+
+/** Text content of a small HTML fragment (tags dropped, common entities decoded). */
+const htmlText = (html: string): string =>
+  html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;|&#160;/g, " ")
+    .replace(/&quot;|&#34;/g, '"')
+    .replace(/&#39;|&#x27;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+
+// Older notes and files kept their leading "# Title" in the body, so the title
+// would show twice; flag it and let CSS hide that first heading.
+const leadingH1 = /^\s*<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(reading.contentHtml);
+const dupTitle = leadingH1?.[1] !== undefined && comparable(htmlText(leadingH1[1])) === comparable(reading.title);
+
+// Notes and uploaded files have no web original to link back to.
+const original = httpUrl(reading.url);
+
+// Resume point for the scroll script (0..1).
+const startProgress = reading.progress ?? 0;
+
+const colorNames: Record<(typeof HIGHLIGHT_COLORS)[number], string> = {
+  yellow: "Yellow",
+  green: "Green",
+  blue: "Blue",
+  pink: "Pink",
+};
+---
+
+<Base title={reading.title}>
+  <div class="read-progress" id="read-progress"></div>
+
+  <main
+    class="reader-shell"
+    id="reader-root"
+    data-reading-id={reading.id}
+    data-start-progress={String(startProgress)}
+    data-status={reading.status}
+    data-highlights={JSON.stringify(highlights)}
+  >
+    <div class="reader-topbar">
+      <a class="reader-back" href="/">← Back to feed</a>
+      <button
+        class="btn hl-panel-toggle"
+        id="hl-panel-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="hl-panel"
+      >
+        <span>Highlights &amp; notes</span>
+        <span class="hl-count" id="hl-count" hidden={highlights.length === 0}>{highlights.length}</span>
+      </button>
+    </div>
+
+    <header class="reader-header">
+      <h1 class="reader-title">{reading.title}</h1>
+      <div class="reader-byline">
+        {/* Separator dots come from CSS (.reader-byline > *::before), clipped at line starts. */}
+        {bylineParts.map((part) => <span>{part}</span>)}
+        {
+          original && (
+            <span>
+              <a class="reader-original" href={original.href} target="_blank" rel="noopener noreferrer">
+                Read the original on {displayHost(original)}&nbsp;↗
+              </a>
+            </span>
+          )
+        }
+      </div>
+    </header>
+
+    <article
+      class="prose"
+      id="reader-article"
+      data-dup-title={dupTitle ? "" : undefined}
+      set:html={reading.contentHtml}
+    />
+  </main>
+
+  <!-- Floating selection toolbar (positioned by scripts/highlighter.ts). -->
+  <div class="hl-toolbar" id="hl-toolbar" role="toolbar" aria-label="Highlight selection" hidden>
+    <div class="hl-swatches">
+      {
+        HIGHLIGHT_COLORS.map((color) => (
+          <button
+            class="hl-swatch"
+            type="button"
+            data-hl-color={color}
+            aria-label={`${colorNames[color]} highlight`}
+            title={color === "yellow" ? "Yellow highlight (H)" : `${colorNames[color]} highlight`}
+            aria-pressed="false"
+          >
+            <span class="hl-swatch-dot" data-color={color} aria-hidden="true" />
+          </button>
+        ))
+      }
+    </div>
+    <span class="hl-sep" aria-hidden="true"></span>
+    <button class="hl-tool" type="button" data-hl-action="note" aria-label="Add note" title="Add note">
+      Note
+    </button>
+    <button class="hl-tool" type="button" data-hl-action="copy" aria-label="Copy text" title="Copy text">
+      <span class="hl-copy-label">Copy</span><span class="hl-copied-label" aria-hidden="true">Copied</span>
+    </button>
+    <button
+      class="hl-tool hl-tool-danger"
+      type="button"
+      data-hl-action="delete"
+      aria-label="Delete highlight"
+      title="Delete highlight"
+      hidden
+    >
+      Delete
+    </button>
+  </div>
+
+  <!-- Note editor for one highlight. -->
+  <div class="hl-note-pop" id="hl-note-pop" role="dialog" aria-labelledby="hl-note-label" hidden>
+    <p class="hl-note-quote" id="hl-note-quote"></p>
+    <label class="hl-note-label" id="hl-note-label" for="hl-note-text">Note</label>
+    <textarea
+      id="hl-note-text"
+      class="hl-textarea"
+      rows="4"
+      maxlength="5000"
+      placeholder="Why does this passage matter?"></textarea>
+    <div class="hl-note-actions">
+      <span class="hl-hint">⌘/Ctrl + Enter to save · Esc to cancel</span>
+      <button class="btn" type="button" id="hl-note-cancel">Cancel</button>
+      <button class="btn btn-primary" type="button" id="hl-note-save">Save</button>
+    </div>
+  </div>
+
+  <!-- Highlights & notes panel: side sheet on desktop, bottom sheet on phones. -->
+  <div class="hl-scrim" id="hl-scrim" hidden></div>
+  <aside class="hl-panel" id="hl-panel" aria-labelledby="hl-panel-title" data-open="false" inert>
+    <div class="hl-panel-head">
+      <h2 class="hl-panel-title" id="hl-panel-title">Highlights &amp; notes</h2>
+      <button class="btn btn-icon hl-panel-close" id="hl-panel-close" type="button" aria-label="Close panel" title="Close (Esc)">
+        ✕
+      </button>
+    </div>
+
+    <section class="hl-section">
+      <label class="hl-section-label" for="reading-note">Your notes on this piece</label>
+      <textarea
+        id="reading-note"
+        class="hl-textarea hl-reading-note"
+        rows="5"
+        maxlength="20000"
+        placeholder="What did you take away? Anything to follow up on?">{reading.note ?? ""}</textarea>
+      <p class="hl-saved" id="reading-note-status" aria-live="polite"></p>
+    </section>
+
+    <section class="hl-section" aria-labelledby="hl-list-title">
+      <div class="hl-section-row">
+        <h3 class="hl-section-label" id="hl-list-title">Highlights</h3>
+        <a
+          class="hl-export"
+          id="hl-export"
+          href={`/api/highlights/export?readingId=${encodeURIComponent(reading.id)}`}
+          download
+          hidden={highlights.length === 0 && !reading.note?.trim()}
+        >
+          Export
+        </a>
+      </div>
+      <ol class="hl-list" id="hl-list" hidden></ol>
+      <p class="hl-empty" id="hl-empty" hidden={highlights.length > 0}>
+        Select any passage in the text and pick a color to highlight it. Press <kbd>H</kbd> to highlight a selection in
+        yellow, or <kbd>Tab</kbd> to reach the colors.
+      </p>
+      <div class="hl-orphans" id="hl-orphans" hidden>
+        <h3 class="hl-section-label">Couldn't place</h3>
+        <p class="hl-orphans-hint">These passages no longer appear in the text as saved. They're kept here so nothing is lost.</p>
+        <ul class="hl-list" id="hl-orphan-list"></ul>
+      </div>
+    </section>
+  </aside>
+
+  <!-- Visual toast (with Undo) + a separate always-present live region for screen readers. -->
+  <p class="rb-sr-only" id="hl-live" aria-live="polite"></p>
+  <div class="hl-toast" id="hl-toast" hidden>
+    <span id="hl-toast-text"></span>
+    <button class="hl-toast-action" id="hl-toast-action" type="button" hidden></button>
+  </div>
+
+  <ControlRail variant="reader" />
+
+  <script>
+    import "../../scripts/reader";
+    import "../../scripts/highlighter";
+  </script>
+</Base>

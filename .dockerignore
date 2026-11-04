@@ -1,0 +1,42 @@
+# Keep the build context small and free of secrets / local state.
+# Dependencies are installed inside the image (native modules must be built for Linux).
+**/node_modules
+**/dist
+**/.builds
+**/.astro
+**/.turbo
+coverage
+
+# Your shelf and secrets never go into an image (or even the build context).
+# .dockerignore patterns are root-relative, so `**/` is needed to match at any
+# depth, e.g. a stray apps/web/data/readbook.db holding a saved API key.
+**/.env
+**/.env.*
+!.env.example
+**/.dev.vars
+data
+apps/web/data
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.db-journal
+**/*.sqlite
+**/*.sqlite3
+
+# VCS, editor, agent and CI files
+.git
+.github
+.vscode
+.idea
+**/.DS_Store
+**/*.log
+.claude
+.agents
+.playwright-mcp
+# Root-level screenshots and docs (patterns here are root-relative)
+/*.png
+docs
+context
+Dockerfile
+compose.yaml
+.dockerignore

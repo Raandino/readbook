@@ -1,0 +1,186 @@
+---
+/**
+ * index.astro — the shelf. Add something at the top; below it, filter tabs, a
+ * search box, and every Reading as a card, newest first. This is YOUR shelf:
+ * no algorithm, no timeline.
+ *
+ * Everything is driven by the URL so it works without JS and every view is
+ * linkable:
+ *   ?status=unread|reading|read|archived   one lifecycle stage (default: all but archived)
+ *   ?q=<text>                              search title, author, site and body
+ *   ?added=<id>[&deduped=1]                set by the add form: highlight that card
+ */
+import Base from "../layouts/Base.astro";
+import AddLinkForm from "../components/AddLinkForm.astro";
+import FeedFilters from "../components/FeedFilters.astro";
+import ReadingCard from "../components/ReadingCard.astro";
+import ControlRail from "../components/ControlRail.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import type { ReadingSummary, ReadingStatus } from "@readbook/core";
+import { countByStatus, getReading, listReadingSummaries } from "@readbook/db";
+
+export const prerender = false;
+
+type Filter = ReadingStatus | "all";
+
+const STATUSES: readonly ReadingStatus[] = ["unread", "reading", "read", "archived"];
+const MAX_QUERY_CHARS = 200;
+
+const params = Astro.url.searchParams;
+const statusParam = params.get("status");
+const filter: Filter = STATUSES.find((s) => s === statusParam) ?? "all";
+const query = (params.get("q") ?? "").trim().slice(0, MAX_QUERY_CHARS);
+
+/** Tab counts. "all" = everything except archived (what the All tab lists). */
+function tabCounts(byStatus: Record<ReadingStatus, number>): Record<Filter, number> {
+  return { ...byStatus, all: byStatus.unread + byStatus.reading + byStatus.read };
+}
+
+let readings: ReadingSummary[];
+let counts: Record<Filter, number>;
+let shelfTotal: number;
+
+if (query) {
+  // Searching: one query, then counts + the tab's slice come from the matches,
+  // so "Unread 2" means two unread results, not two unread readings overall.
+  const matches = listReadingSummaries({ query });
+  const byStatus: Record<ReadingStatus, number> = { unread: 0, reading: 0, read: 0, archived: 0 };
+  for (const r of matches) byStatus[r.status] += 1;
+  counts = tabCounts(byStatus);
+  readings = matches.filter((r) => (filter === "all" ? r.status !== "archived" : r.status === filter));
+  shelfTotal = countByStatus().all;
+} else {
+  const totals = countByStatus();
+  counts = tabCounts(totals);
+  shelfTotal = totals.all;
+  readings = filter === "all" ? listReadingSummaries({ excludeArchived: true }) : listReadingSummaries({ status: filter });
+}
+
+// ---- Just-added confirmation ------------------------------------------------
+const addedId = params.get("added");
+const added = addedId && addedId.length <= 64 ? getReading(addedId) : null;
+const addedInView = added ? readings.some((r) => r.id === added.id) : false;
+
+const STATUS_NAME: Record<ReadingStatus, string> = {
+  unread: "Unread",
+  reading: "Reading",
+  read: "Read",
+  archived: "Archived",
+};
+
+let notice: { text: string; link?: { href: string; label: string } } | null = null;
+if (added) {
+  const text = params.get("deduped") === "1" ? "Already on your shelf." : "Added to your shelf.";
+  notice = addedInView
+    ? { text }
+    : {
+        text: added.status === "archived" ? `${text} It's in your archive.` : text,
+        link: {
+          href: `/?status=${added.status}&added=${encodeURIComponent(added.id)}`,
+          label: `Show it in ${STATUS_NAME[added.status]}`,
+        },
+      };
+} else if (params.get("add_error")) {
+  // Set by /api/add when the form was posted without JavaScript. Only known
+  // codes are shown; the URL can never inject its own text.
+  const ADD_ERRORS: Record<string, string> = {
+    invalid: "That doesn't look like a link Readbook can read. Paste a full http(s) URL.",
+    too_large: "That file is too large. Uploads must be 50 MB or smaller.",
+    unreadable: "Readbook couldn't read that page. Try another link, or add a Firecrawl key in Settings.",
+    unknown: "Something went wrong adding that. Please try again.",
+  };
+  notice = { text: ADD_ERRORS[params.get("add_error") ?? ""] ?? ADD_ERRORS.unknown! };
+}
+
+// ---- Empty states -------------------------------------------------------------
+// Always rendered (hidden while there are cards) so the feed script can reveal
+// the right message when the last card leaves the view.
+const clearSearchHref = filter === "all" ? "/" : `/?status=${filter}`;
+
+const empty: { title: string; body: string; link?: { href: string; label: string } } = query
+  ? {
+      title: `No results for “${query}”`,
+      body: filter === "all" ? "Try a different word, or check the archive." : "Try a different word or another tab.",
+      link: { href: clearSearchHref, label: "Clear search" },
+    }
+  : filter === "unread"
+    ? { title: "All caught up", body: "Nothing unread right now. Paste a link above to add something new." }
+    : filter === "reading"
+      ? { title: "Nothing in progress", body: "Start a reading and it waits here, with your place saved." }
+      : filter === "read"
+        ? { title: "Nothing finished yet", body: "Readings you finish collect here." }
+        : filter === "archived"
+          ? {
+              title: "Nothing archived yet",
+              body: "Archive a reading when you're done with it — it stays here, out of the way.",
+            }
+          : shelfTotal === 0
+            ? {
+                title: "Your shelf is empty",
+                body: "Paste any link above — a Substack post, a blog, a Reddit or X thread — write a note, or drop in an EPUB or Markdown file. Readbook turns it into one calm, book-like read.",
+              }
+            : {
+                title: "Your shelf is clear",
+                body: "Nothing left to read here.",
+                link: { href: "/?status=archived", label: "Browse the archive" },
+              };
+
+const pageTitle = query
+  ? `“${query}” · Readbook`
+  : filter === "all"
+    ? "Readbook"
+    : `${STATUS_NAME[filter]} · Readbook`;
+---
+
+<Base title={pageTitle}>
+  <main class="shell">
+    <SiteHeader current="shelf" />
+    <h1 class="sr-only">Your shelf</h1>
+
+    <AddLinkForm notice={notice} />
+
+    <FeedFilters current={filter} query={query} counts={counts} />
+
+    {
+      query && (
+        <p class="feed-summary">
+          <span data-result-count>
+            {readings.length} {readings.length === 1 ? "result" : "results"}
+          </span>{" "}
+          for “{query}”{" "}
+          <a class="feed-summary-clear" href={clearSearchHref}>
+            Clear search
+          </a>
+        </p>
+      )
+    }
+
+    <ul class="feed" data-feed data-filter={filter} hidden={readings.length === 0}>
+      {
+        readings.map((reading) => (
+          <li>
+            <ReadingCard reading={reading} added={reading.id === added?.id} />
+          </li>
+        ))
+      }
+    </ul>
+
+    <div class="empty" data-feed-empty tabindex="-1" hidden={readings.length > 0}>
+      <h2>{empty.title}</h2>
+      <p>{empty.body}</p>
+      {empty.link && <a class="btn" href={empty.link.href}>{empty.link.label}</a>}
+    </div>
+  </main>
+
+  <div class="toast" data-toast hidden>
+    <p class="toast-text" data-toast-text aria-hidden="true"></p>
+    <button type="button" class="toast-undo" data-toast-undo>Undo</button>
+  </div>
+  <p class="sr-only" data-announcer role="status" aria-live="polite" aria-atomic="true"></p>
+
+  <ControlRail variant="feed" />
+
+  <script>
+    import "../scripts/feed.ts";
+  </script>
+</Base>

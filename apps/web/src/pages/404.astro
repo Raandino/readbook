@@ -1,0 +1,30 @@
+---
+/**
+ * 404.astro — a quiet dead end with one way home. Same calm shell as the feed.
+ */
+import Base from "../layouts/Base.astro";
+import ControlRail from "../components/ControlRail.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+
+export const prerender = false;
+
+Astro.response.status = 404;
+---
+
+<Base title="Not found · Readbook">
+  <main class="shell">
+    <SiteHeader />
+
+    <section class="not-found" aria-labelledby="not-found-title">
+      <p class="not-found-mark" aria-hidden="true">404</p>
+      <h1 id="not-found-title">This page isn't on the shelf</h1>
+      <p>
+        The link may be mistyped, or the reading it pointed to was deleted. Everything
+        you've saved is still where you left it.
+      </p>
+      <a class="btn btn-primary" href="/">Back to your shelf</a>
+    </section>
+  </main>
+
+  <ControlRail variant="feed" />
+</Base>

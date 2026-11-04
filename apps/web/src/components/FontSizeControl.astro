@@ -1,0 +1,38 @@
+---
+/**
+ * FontSizeControl — A- / A+ buttons that nudge the --reading-scale variable on
+ * <html> and persist it. The reader column scales with it (reading.css,
+ * .reader-shell), so the line length in characters holds at every size.
+ */
+---
+
+<div class="control-group" role="group" aria-label="Font size">
+  <button class="btn" type="button" id="font-smaller" aria-label="Smaller text">A−</button>
+  <button class="btn" type="button" id="font-larger" aria-label="Larger text">A+</button>
+</div>
+
+<script>
+  // Bundled module script (not is:inline) so the strict CSP covers it.
+  const MIN = 0.85;
+  const MAX = 1.6;
+  const STEP = 0.08;
+  const root = document.documentElement;
+
+  function get(): number {
+    const v = parseFloat(getComputedStyle(root).getPropertyValue("--reading-scale"));
+    return Number.isNaN(v) ? 1 : v;
+  }
+
+  function set(value: number): void {
+    const v = Math.min(MAX, Math.max(MIN, Math.round(value * 100) / 100));
+    root.style.setProperty("--reading-scale", String(v));
+    try {
+      localStorage.setItem("readbook-scale", String(v));
+    } catch {
+      // Storage disabled: size applies for this page only.
+    }
+  }
+
+  document.getElementById("font-smaller")?.addEventListener("click", () => set(get() - STEP));
+  document.getElementById("font-larger")?.addEventListener("click", () => set(get() + STEP));
+</script>

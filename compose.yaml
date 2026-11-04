@@ -1,0 +1,38 @@
+# Readbook with Docker Compose:
+#
+#   docker compose up -d --build
+#   open http://localhost:4321
+#
+# Your shelf lives in the named volume `readbook-data` and survives rebuilds.
+# Back it up by copying the whole folder (incl. any -wal file) while stopped:
+#   docker compose stop && docker compose cp readbook:/data/. ./readbook-backup/ && docker compose start
+services:
+  readbook:
+    build: .
+    image: readbook:local
+    # Forward SIGTERM properly so `docker compose down` stops the server cleanly.
+    init: true
+    restart: unless-stopped
+    ports:
+      # Loopback only. Readbook has no login: anyone who can reach this port can
+      # read, add and delete everything on your shelf. Publishing on 127.0.0.1
+      # keeps it on this machine; a bare "4321:4321" would expose it to your
+      # whole network (and Docker's port publishing bypasses most host firewalls).
+      # To read from another device on purpose, change this AND add that
+      # device-facing hostname/IP to READBOOK_ALLOWED_HOSTS below.
+      - "127.0.0.1:4321:4321"
+    environment:
+      # Optional. Interpolated from your shell or the repo-root .env. You can
+      # also leave it empty and paste the key on the Settings page instead.
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      # READBOOK_ALLOWED_HOSTS: localhost,192.168.1.20
+      # READBOOK_ALLOW_PRIVATE_NETWORK: "false"
+      # READBOOK_FIRECRAWL_PROXY: basic
+      # READBOOK_USER_AGENT: ""
+      # Don't override READBOOK_DB_PATH, HOST or PORT here: the image sets them
+      # to match the volume and the port mapping.
+    volumes:
+      - readbook-data:/data
+
+volumes:
+  readbook-data:

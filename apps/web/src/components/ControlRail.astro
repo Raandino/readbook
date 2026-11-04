@@ -1,0 +1,70 @@
+---
+/**
+ * ControlRail — the floating reading controls.
+ *
+ * On wide desktops it lives vertically in the right-hand whitespace beside the
+ * content column (no chrome, just buttons in the margin). On narrow screens it
+ * collapses into a small floating cluster pinned bottom-right. The reader variant
+ * adds font-size controls; both variants get theme + back-to-top.
+ *
+ * The control scripts (ThemeToggle, FontSizeControl) live in their own
+ * components and use fixed element ids, so the rail hosts exactly ONE of each —
+ * remove the inline copies from the page when you use the rail.
+ */
+import ThemeToggle from "./ThemeToggle.astro";
+import FontSizeControl from "./FontSizeControl.astro";
+
+interface Props {
+  variant?: "feed" | "reader";
+}
+
+const { variant = "feed" } = Astro.props;
+---
+
+<aside class="control-rail" data-variant={variant} aria-label="Reading controls">
+  {variant === "reader" && <FontSizeControl />}
+  {
+    variant === "reader" && (
+      <button
+        class="btn btn-icon"
+        type="button"
+        data-hl-panel-toggle
+        aria-controls="hl-panel"
+        aria-expanded="false"
+        aria-label="Highlights & notes"
+        title="Highlights & notes"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m9 11-6 6v3h9l3-3" />
+          <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+        </svg>
+      </button>
+    )
+  }
+  <ThemeToggle />
+  <button
+    class="btn btn-icon rail-top"
+    id="rail-scroll-top"
+    type="button"
+    aria-label="Back to top"
+    title="Back to top"
+    hidden
+  >
+    ↑
+  </button>
+</aside>
+
+<script>
+  // Bundled module script (not is:inline) so the strict CSP covers it.
+  const top = document.getElementById("rail-scroll-top");
+  if (top) {
+    const update = (): void => {
+      // Only offer "back to top" once there's somewhere to go back to.
+      if (window.scrollY > 600) top.removeAttribute("hidden");
+      else top.setAttribute("hidden", "");
+    };
+    top.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+    window.addEventListener("scroll", update, { passive: true });
+    update();
+  }
+</script>

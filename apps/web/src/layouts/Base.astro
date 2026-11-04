@@ -1,0 +1,35 @@
+---
+/**
+ * Base.astro — the html shell shared by feed + reader.
+ *
+ * The theme is applied by an inline script BEFORE first paint so switching
+ * themes (or reloading on dark) never flashes the wrong background.
+ */
+import "../styles/reading.css";
+
+interface Props {
+  title?: string;
+}
+
+const { title = "Readbook" } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>{title}</title>
+    <!--
+      No-flash theme bootstrap: a tiny blocking script that applies the saved
+      theme/scale before the body renders. External (not inline) so the CSP
+      can stay strict.
+    -->
+    <script is:inline src="/theme-init.js"></script>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>
