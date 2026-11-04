@@ -132,6 +132,21 @@ restore it anywhere. Restores merge, so they're safe to run twice.
 
 ## Quick start
 
+### The easy way: ask your AI assistant
+
+Not a developer? Copy this sentence into an AI agent that can run commands on your computer
+(Claude Code, Codex, Cursor, Windsurf…):
+
+```text
+Install Readbook for me by following https://raw.githubusercontent.com/Raandino/readbook/main/prompt.md
+```
+
+[`prompt.md`](prompt.md) walks the agent through everything in plain language: it checks
+your computer, asks before installing anything, starts Readbook, gives you a short tour, and
+can put a double-click launcher on your Desktop.
+
+### By hand
+
 You need **[Node.js 22.12+](https://nodejs.org)** and **pnpm** (`corepack enable` installs the
 right version for you).
 
