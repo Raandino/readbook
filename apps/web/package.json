@@ -16,8 +16,8 @@
     "@readbook/core": "workspace:*",
     "@readbook/db": "workspace:*",
     "@readbook/extractor": "workspace:*",
-    "@astrojs/node": "11.1.9",
-    "astro": "7.4.5",
+    "@astrojs/node": "11.1.11",
+    "astro": "7.4.7",
     "better-sqlite3": "12.11.1"
   },
   "devDependencies": {
